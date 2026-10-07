@@ -27,12 +27,14 @@ def download_model():
     # Thu tai tu AWS S3 bang boto3
     try:
         import boto3
-        s3 = boto3.client("s3")
+        region = os.environ.get("AWS_DEFAULT_REGION", "us-east-2")
+        endpoint_url = os.environ.get("AWS_ENDPOINT_URL_S3", "https://s3.us-east-2.amazonaws.com")
+        s3 = boto3.client("s3", region_name=region, endpoint_url=endpoint_url)
         s3.download_file(bucket, MODEL_KEY, MODEL_PATH)
         print("Model da duoc tai xuong tu AWS S3.")
         return
     except Exception as s3_err:
-        pass
+        print(f"Thong bao tai S3: {s3_err}")
 
     # Thu tai tu Google Cloud Storage neu cau hinh GCP
     try:
@@ -62,6 +64,17 @@ def download_model():
 
 # Goi ham nay khi module duoc import (chay khi server khoi dong)
 download_model()
+
+# Tuong thich giua cac phien ban scikit-learn (vi du pickle 1.4.2 load tren 1.9+)
+try:
+    import sklearn._loss._loss as _loss_mod
+    if not hasattr(_loss_mod, "__pyx_unpickle_CyHalfBinomialLoss"):
+        def _compat_cyhalfbinomial(*args):
+            return _loss_mod.CyHalfBinomialLoss()
+        _loss_mod.__pyx_unpickle_CyHalfBinomialLoss = _compat_cyhalfbinomial
+except Exception:
+    pass
+
 model = joblib.load(MODEL_PATH)
 
 

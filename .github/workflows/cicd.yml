@@ -62,7 +62,7 @@ jobs:
           STORAGE_CRED: ${{ secrets.STORAGE_CREDENTIALS }}
         run: |
           python - <<'PYEOF'
-          import os, json, sys
+          import os, json, sys, subprocess
           from pathlib import Path
 
           aws_key = os.environ.get("AWS_KEY", "").strip()
@@ -95,15 +95,21 @@ jobs:
               f.write("AWS_REGION=us-east-2\n")
               f.write("AWS_ENDPOINT_URL_S3=https://s3.us-east-2.amazonaws.com\n")
 
-          print("AWS credentials configured successfully.")
+          # Set DVC credentials directly with actual string values
+          subprocess.run(["dvc", "remote", "modify", "--local", "labstore", "access_key_id", aws_key], check=True)
+          subprocess.run(["dvc", "remote", "modify", "--local", "labstore", "secret_access_key", aws_sec], check=True)
+          subprocess.run(["dvc", "remote", "modify", "labstore", "region", "us-east-2"], check=True)
+          subprocess.run(["dvc", "remote", "modify", "labstore", "endpointurl", "https://s3.us-east-2.amazonaws.com"], check=True)
+
+          print("AWS and DVC credentials configured successfully.")
           PYEOF
 
-          dvc remote modify --local labstore access_key_id "$AWS_ACCESS_KEY_ID"
-          dvc remote modify --local labstore secret_access_key "$AWS_SECRET_ACCESS_KEY"
-          dvc remote modify labstore region us-east-2
-          dvc remote modify labstore endpointurl https://s3.us-east-2.amazonaws.com
-
       - name: Pull data with DVC
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-2
+          AWS_REGION: us-east-2
         run: dvc pull -v data/train_batch1.csv.dvc data/holdout.csv.dvc
 
       - name: Train model
@@ -118,6 +124,10 @@ jobs:
       - name: Upload model to Cloud Storage
         env:
           ARTIFACT_BUCKET: ${{ secrets.ARTIFACT_BUCKET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-2
+          AWS_REGION: us-east-2
         run: |
           python - <<'PYEOF'
           import os, boto3
