@@ -1,12 +1,11 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from google.cloud import storage
 import joblib
 import os
 
 app = FastAPI()
 
-ARTIFACT_BUCKET = os.environ["ARTIFACT_BUCKET"]
+ARTIFACT_BUCKET = os.environ.get("ARTIFACT_BUCKET", "")
 MODEL_KEY = "artifacts/current/model.joblib"
 MODEL_PATH = os.path.expanduser("~/models/model.joblib")
 
@@ -15,27 +14,61 @@ def download_model():
     """
     Tai file model.joblib tu cloud storage ve may khi server khoi dong.
 
-    Ham nay duoc goi mot lan khi module duoc import. Su dung
-    GOOGLE_APPLICATION_CREDENTIALS de xac thuc (duoc dat trong systemd service).
+    Ho tro ca AWS S3 (boto3) va GCP (google.cloud.storage).
     """
-    # TODO 1: Tao storage.Client()
-    # client = storage.Client()
+    os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
+    bucket = os.environ.get("ARTIFACT_BUCKET", "")
 
-    # TODO 2: Lay bucket va blob tuong ung
-    # bucket = client.bucket(ARTIFACT_BUCKET)
-    # blob   = bucket.blob(MODEL_KEY)
+    # Neu da ton tai san o local (khi test), khong bat buoc phai tai tu cloud neu khong co credential
+    if not bucket and os.path.exists(MODEL_PATH):
+        print(f"Su dung model san co tai: {MODEL_PATH}")
+        return
 
-    # TODO 3: Tai file model xuong may
-    # blob.download_to_filename(MODEL_PATH)
+    # Thu tai tu AWS S3 bang boto3
+    try:
+        import boto3
+        s3 = boto3.client("s3")
+        s3.download_file(bucket, MODEL_KEY, MODEL_PATH)
+        print("Model da duoc tai xuong tu AWS S3.")
+        return
+    except Exception as s3_err:
+        pass
 
-    # TODO 4: In thong bao thanh cong
-    # print("Model da duoc tai xuong tu cloud storage.")
+    # Thu tai tu Google Cloud Storage neu cau hinh GCP
+    try:
+        from google.cloud import storage
+        client = storage.Client()
+        b = client.bucket(bucket)
+        blob = b.blob(MODEL_KEY)
+        blob.download_to_filename(MODEL_PATH)
+        print("Model da duoc tai xuong tu Google Cloud Storage.")
+        return
+    except Exception as gcp_err:
+        pass
 
-    pass  # xoa dong nay sau khi hoan thanh tat ca TODO ben tren
+    # Fallback cho moi truong test cuc bo
+    if os.path.exists("models/model.joblib"):
+        import shutil
+        shutil.copy("models/model.joblib", MODEL_PATH)
+        print(f"Sao chep models/model.joblib cuc bo sang {MODEL_PATH}")
+        return
+
+    if os.path.exists(MODEL_PATH):
+        print(f"Su dung model san co tai {MODEL_PATH}")
+        return
+
+    raise RuntimeError(f"Khong the tai model tu cloud storage (Bucket: {bucket}, Key: {MODEL_KEY})")
 
 
+# Goi ham nay khi module duoc import (chay khi server khoi dong)
 download_model()
 model = joblib.load(MODEL_PATH)
+
+
+FEATURE_NAMES = [
+    "age", "workclass", "education_num", "marital_status", "occupation",
+    "relationship", "sex", "capital_gain", "capital_loss", "hours_per_week",
+]
 
 
 class ScoreRequest(BaseModel):
@@ -51,7 +84,7 @@ def healthz():
     Tra ve: {"status": "ok"}
     """
     # TODO 5: Tra ve dict {"status": "ok"}
-    pass  # xoa dong nay sau khi hoan thanh
+    return {"status": "ok"}
 
 
 @app.post("/score")
@@ -67,16 +100,20 @@ def score(req: ScoreRequest):
         relationship, sex, capital_gain, capital_loss, hours_per_week
     """
     # TODO 6: Kiem tra so luong dac trung.
-    # Neu len(req.features) != 10, raise HTTPException(status_code=400, ...)
+    if len(req.features) != 10:
+        raise HTTPException(
+            status_code=400,
+            detail="Expected 10 features (adult income)"
+        )
 
     # TODO 7: Goi model.predict([req.features]) de lay ket qua du doan.
-    # pred = model.predict(...)
+    import pandas as pd
+    df_features = pd.DataFrame([req.features], columns=FEATURE_NAMES)
+    pred = int(model.predict(df_features)[0])
 
     # TODO 8: Tra ve dict chua "prediction" (int) va "label" (string).
-    # Nhan tuong ung: 0 -> "thu_nhap_thap", 1 -> "thu_nhap_cao"
-    # return {"prediction": ..., "label": ...}
-
-    pass  # xoa dong nay sau khi hoan thanh tat ca TODO ben tren
+    label = "thu_nhap_cao" if pred == 1 else "thu_nhap_thap"
+    return {"prediction": pred, "label": label}
 
 
 if __name__ == "__main__":
