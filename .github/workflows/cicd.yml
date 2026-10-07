@@ -16,8 +16,6 @@ jobs:
   # ---------------------------------------------------------------------------
   # JOB 1 - UNIT TEST
   # Chay unit tests tren du lieu ao (khong can ket noi cloud storage).
-  # Neu co bat ky test nao that bai, pipeline dung lai o day va khong tien hanh
-  # huan luyen hay trien khai.
   # ---------------------------------------------------------------------------
   unit-test:
     name: Unit Test
@@ -39,17 +37,11 @@ jobs:
   # ---------------------------------------------------------------------------
   # JOB 2 - TRAIN
   # Xac thuc cloud storage, pull du lieu bang DVC, huan luyen mo hinh, upload artifact.
-  # Chi chay khi Job 1 (Unit Test) hoan thanh thanh cong.
   # ---------------------------------------------------------------------------
   train:
     name: Train
     needs: unit-test
     runs-on: ubuntu-latest
-    env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_DEFAULT_REGION: us-east-2
-      AWS_REGION: us-east-2
     outputs:
       f1: ${{ steps.read_report.outputs.f1 }}
 
@@ -64,18 +56,63 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Authenticate and Configure DVC
+        env:
+          AWS_KEY: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SEC: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          STORAGE_CRED: ${{ secrets.STORAGE_CREDENTIALS }}
         run: |
-          if [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
-            dvc remote modify --local labstore access_key_id "${{ secrets.AWS_ACCESS_KEY_ID }}"
-            dvc remote modify --local labstore secret_access_key "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
-            dvc remote modify labstore region us-east-2
-            echo "Configured DVC with AWS S3 credentials."
-          elif [ -n "${{ secrets.STORAGE_CREDENTIALS }}" ]; then
-            echo '${{ secrets.STORAGE_CREDENTIALS }}' > /tmp/sa-key.json
-            echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa-key.json" >> $GITHUB_ENV
-            dvc remote modify labstore credentialpath /tmp/sa-key.json
-            echo "Configured DVC with GCP credentials."
-          fi
+          python - <<'PYEOF'
+          import os, json, sys
+          from pathlib import Path
+
+          aws_key = os.environ.get("AWS_KEY", "").strip()
+          aws_sec = os.environ.get("AWS_SEC", "").strip()
+          storage_cred = os.environ.get("STORAGE_CRED", "").strip()
+
+          # Ho tro doc tu STORAGE_CREDENTIALS neu luu o dang JSON
+          if not aws_key and storage_cred:
+              try:
+                  data = json.loads(storage_cred)
+                  aws_key = data.get("aws_access_key_id", data.get("AWS_ACCESS_KEY_ID", ""))
+                  aws_sec = data.get("aws_secret_access_key", data.get("AWS_SECRET_ACCESS_KEY", ""))
+              except Exception:
+                  pass
+
+          if not aws_key or not aws_sec:
+              print("=" * 60)
+              print("LỖI: GitHub Actions KHÔNG TÌM THẤY AWS Credentials trong Repository Secrets!")
+              print(f"AWS_ACCESS_KEY_ID rỗng: {not bool(aws_key)}")
+              print(f"AWS_SECRET_ACCESS_KEY rỗng: {not bool(aws_sec)}")
+              print(f"STORAGE_CREDENTIALS rỗng: {not bool(storage_cred)}")
+              print("=" * 60)
+              print("HƯỚNG DẪN KHẮC PHỤC:")
+              print("1. Vào GitHub Repo > Settings > Secrets and variables > Actions")
+              print("2. Đảm bảo các secret nằm ở 'Repository secrets' (KHÔNG PHẢI 'Environment secrets')")
+              print("3. Đảm bảo tên đúng là: AWS_ACCESS_KEY_ID và AWS_SECRET_ACCESS_KEY")
+              print("=" * 60)
+              sys.exit(1)
+
+          # Tao file credentials va config cho AWS CLI / boto3 / s3fs
+          aws_dir = Path.home() / ".aws"
+          aws_dir.mkdir(parents=True, exist_ok=True)
+          with open(aws_dir / "credentials", "w") as f:
+              f.write(f"[default]\naws_access_key_id = {aws_key}\naws_secret_access_key = {aws_sec}\n")
+          with open(aws_dir / "config", "w") as f:
+              f.write("[default]\nregion = us-east-2\n")
+
+          # Ghi vao GITHUB_ENV cho cac buoc sau
+          with open(os.environ["GITHUB_ENV"], "a") as f:
+              f.write(f"AWS_ACCESS_KEY_ID={aws_key}\n")
+              f.write(f"AWS_SECRET_ACCESS_KEY={aws_sec}\n")
+              f.write("AWS_DEFAULT_REGION=us-east-2\n")
+              f.write("AWS_REGION=us-east-2\n")
+
+          print("Da thiet lap credentials va ~/.aws/credentials thanh cong.")
+          PYEOF
+
+          dvc remote modify --local labstore access_key_id "$AWS_ACCESS_KEY_ID"
+          dvc remote modify --local labstore secret_access_key "$AWS_SECRET_ACCESS_KEY"
+          dvc remote modify labstore region us-east-2
 
       - name: Pull data with DVC
         run: dvc pull -v data/train_batch1.csv.dvc data/holdout.csv.dvc
@@ -94,24 +131,15 @@ jobs:
           ARTIFACT_BUCKET: ${{ secrets.ARTIFACT_BUCKET }}
         run: |
           python - <<'PYEOF'
-          import os
+          import os, boto3
 
-          bucket = os.environ["ARTIFACT_BUCKET"]
+          bucket = os.environ.get("ARTIFACT_BUCKET", "income-lab-bucket-nguyen-thanh-nam")
           key = "artifacts/current/model.joblib"
           model_path = "models/model.joblib"
 
-          if os.environ.get("AWS_ACCESS_KEY_ID"):
-              import boto3
-              s3 = boto3.client("s3", region_name="us-east-2")
-              s3.upload_file(model_path, bucket, key)
-              print(f"Uploaded model to s3://{bucket}/{key} successfully")
-          else:
-              from google.cloud import storage
-              client = storage.Client()
-              b = client.bucket(bucket)
-              blob = b.blob(key)
-              blob.upload_from_filename(model_path)
-              print(f"Uploaded model to gs://{bucket}/{key} successfully")
+          s3 = boto3.client("s3", region_name="us-east-2")
+          s3.upload_file(model_path, bucket, key)
+          print(f"Uploaded model to s3://{bucket}/{key} successfully")
           PYEOF
 
       - name: Save report as artifact
@@ -124,7 +152,6 @@ jobs:
   # ---------------------------------------------------------------------------
   # JOB 3 - QUALITY GATE
   # Kiem tra nguong chat luong (f1_score >= 0.65).
-  # Pipeline dung lai o day neu mo hinh chua dat yeu cau.
   # ---------------------------------------------------------------------------
   quality-gate:
     name: Quality Gate
@@ -145,7 +172,6 @@ jobs:
   # ---------------------------------------------------------------------------
   # JOB 4 - RELEASE
   # Trien khai len VM qua SSH.
-  # Chi chay khi Job 3 (Quality Gate) hoan thanh thanh cong.
   # ---------------------------------------------------------------------------
   release:
     name: Release
