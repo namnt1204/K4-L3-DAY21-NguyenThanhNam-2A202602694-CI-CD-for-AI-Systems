@@ -7,6 +7,8 @@ on:
       - 'data/**.dvc'
       - 'src/**.py'
       - 'params.yaml'
+      - '.dvc/**'
+      - '.github/workflows/**'
   workflow_dispatch:
 
 jobs:
@@ -58,15 +60,12 @@ jobs:
 
       - name: Authenticate to Cloud Storage
         run: |
-          # Ho tro ca AWS (Access Key) va GCP (Service Account JSON)
           if [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
             echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> $GITHUB_ENV
             echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> $GITHUB_ENV
-            echo "AWS_DEFAULT_REGION=${{ secrets.AWS_DEFAULT_REGION || 'us-east-1' }}" >> $GITHUB_ENV
-            if [ -n "${{ secrets.AWS_SESSION_TOKEN }}" ]; then
-              echo "AWS_SESSION_TOKEN=${{ secrets.AWS_SESSION_TOKEN }}" >> $GITHUB_ENV
-            fi
-            echo "Configured AWS Credentials."
+            echo "AWS_DEFAULT_REGION=us-east-2" >> $GITHUB_ENV
+            echo "AWS_REGION=us-east-2" >> $GITHUB_ENV
+            echo "Configured AWS Credentials for region us-east-2."
           elif [ -n "${{ secrets.STORAGE_CREDENTIALS }}" ]; then
             echo '${{ secrets.STORAGE_CREDENTIALS }}' > /tmp/sa-key.json
             echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa-key.json" >> $GITHUB_ENV
@@ -98,7 +97,7 @@ jobs:
 
           if os.environ.get("AWS_ACCESS_KEY_ID"):
               import boto3
-              s3 = boto3.client("s3")
+              s3 = boto3.client("s3", region_name="us-east-2")
               s3.upload_file(model_path, bucket, key)
               print(f"Uploaded model to s3://{bucket}/{key} successfully")
           else:
