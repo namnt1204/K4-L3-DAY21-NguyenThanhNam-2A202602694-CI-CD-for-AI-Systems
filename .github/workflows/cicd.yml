@@ -45,6 +45,11 @@ jobs:
     name: Train
     needs: unit-test
     runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: us-east-2
+      AWS_REGION: us-east-2
     outputs:
       f1: ${{ steps.read_report.outputs.f1 }}
 
@@ -58,22 +63,22 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Authenticate to Cloud Storage
+      - name: Authenticate and Configure DVC
         run: |
           if [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
-            echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> $GITHUB_ENV
-            echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> $GITHUB_ENV
-            echo "AWS_DEFAULT_REGION=us-east-2" >> $GITHUB_ENV
-            echo "AWS_REGION=us-east-2" >> $GITHUB_ENV
-            echo "Configured AWS Credentials for region us-east-2."
+            dvc remote modify --local labstore access_key_id "${{ secrets.AWS_ACCESS_KEY_ID }}"
+            dvc remote modify --local labstore secret_access_key "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+            dvc remote modify labstore region us-east-2
+            echo "Configured DVC with AWS S3 credentials."
           elif [ -n "${{ secrets.STORAGE_CREDENTIALS }}" ]; then
             echo '${{ secrets.STORAGE_CREDENTIALS }}' > /tmp/sa-key.json
             echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa-key.json" >> $GITHUB_ENV
-            echo "Configured GCP Credentials."
+            dvc remote modify labstore credentialpath /tmp/sa-key.json
+            echo "Configured DVC with GCP credentials."
           fi
 
       - name: Pull data with DVC
-        run: dvc pull data/train_batch1.csv.dvc data/holdout.csv.dvc
+        run: dvc pull -v data/train_batch1.csv.dvc data/holdout.csv.dvc
 
       - name: Train model
         run: python src/train.py
