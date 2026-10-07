@@ -3,3 +3,4 @@
 ['remote "labstore"']
     url = s3://income-lab-bucket-nguyen-thanh-nam/dvc
     region = us-east-2
+    endpointurl = https://s3.us-east-2.amazonaws.com

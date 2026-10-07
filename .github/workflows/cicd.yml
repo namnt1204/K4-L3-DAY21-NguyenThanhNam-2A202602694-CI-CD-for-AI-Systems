@@ -69,7 +69,6 @@ jobs:
           aws_sec = os.environ.get("AWS_SEC", "").strip()
           storage_cred = os.environ.get("STORAGE_CRED", "").strip()
 
-          # Ho tro doc tu STORAGE_CREDENTIALS neu luu o dang JSON
           if not aws_key and storage_cred:
               try:
                   data = json.loads(storage_cred)
@@ -79,20 +78,9 @@ jobs:
                   pass
 
           if not aws_key or not aws_sec:
-              print("=" * 60)
-              print("LỖI: GitHub Actions KHÔNG TÌM THẤY AWS Credentials trong Repository Secrets!")
-              print(f"AWS_ACCESS_KEY_ID rỗng: {not bool(aws_key)}")
-              print(f"AWS_SECRET_ACCESS_KEY rỗng: {not bool(aws_sec)}")
-              print(f"STORAGE_CREDENTIALS rỗng: {not bool(storage_cred)}")
-              print("=" * 60)
-              print("HƯỚNG DẪN KHẮC PHỤC:")
-              print("1. Vào GitHub Repo > Settings > Secrets and variables > Actions")
-              print("2. Đảm bảo các secret nằm ở 'Repository secrets' (KHÔNG PHẢI 'Environment secrets')")
-              print("3. Đảm bảo tên đúng là: AWS_ACCESS_KEY_ID và AWS_SECRET_ACCESS_KEY")
-              print("=" * 60)
+              print("ERROR: AWS credentials not found in secrets!")
               sys.exit(1)
 
-          # Tao file credentials va config cho AWS CLI / boto3 / s3fs
           aws_dir = Path.home() / ".aws"
           aws_dir.mkdir(parents=True, exist_ok=True)
           with open(aws_dir / "credentials", "w") as f:
@@ -100,19 +88,20 @@ jobs:
           with open(aws_dir / "config", "w") as f:
               f.write("[default]\nregion = us-east-2\n")
 
-          # Ghi vao GITHUB_ENV cho cac buoc sau
           with open(os.environ["GITHUB_ENV"], "a") as f:
               f.write(f"AWS_ACCESS_KEY_ID={aws_key}\n")
               f.write(f"AWS_SECRET_ACCESS_KEY={aws_sec}\n")
               f.write("AWS_DEFAULT_REGION=us-east-2\n")
               f.write("AWS_REGION=us-east-2\n")
+              f.write("AWS_ENDPOINT_URL_S3=https://s3.us-east-2.amazonaws.com\n")
 
-          print("Da thiet lap credentials va ~/.aws/credentials thanh cong.")
+          print("AWS credentials configured successfully.")
           PYEOF
 
           dvc remote modify --local labstore access_key_id "$AWS_ACCESS_KEY_ID"
           dvc remote modify --local labstore secret_access_key "$AWS_SECRET_ACCESS_KEY"
           dvc remote modify labstore region us-east-2
+          dvc remote modify labstore endpointurl https://s3.us-east-2.amazonaws.com
 
       - name: Pull data with DVC
         run: dvc pull -v data/train_batch1.csv.dvc data/holdout.csv.dvc
@@ -137,7 +126,7 @@ jobs:
           key = "artifacts/current/model.joblib"
           model_path = "models/model.joblib"
 
-          s3 = boto3.client("s3", region_name="us-east-2")
+          s3 = boto3.client("s3", region_name="us-east-2", endpoint_url="https://s3.us-east-2.amazonaws.com")
           s3.upload_file(model_path, bucket, key)
           print(f"Uploaded model to s3://{bucket}/{key} successfully")
           PYEOF
