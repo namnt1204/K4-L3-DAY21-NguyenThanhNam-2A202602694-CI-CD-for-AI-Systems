@@ -186,5 +186,13 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
             sudo systemctl restart income-api
-            sleep 5
-            curl -sf http://localhost:8080/healthz && echo "Health check passed." || exit 1
+            for i in $(seq 1 15); do
+              if curl -sf http://localhost:8080/healthz; then
+                echo "Health check passed."
+                exit 0
+              fi
+              echo "Waiting for API server to start... ($i/15)"
+              sleep 2
+            done
+            echo "Health check failed after 30 seconds."
+            exit 1
